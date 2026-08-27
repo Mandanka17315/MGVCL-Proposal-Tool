@@ -12345,12 +12345,17 @@ const UG_LAB_RATE = {
   sandDouble:   172,   // Sr 11 — sand 0.300 x 0.750 x 1.00 Mtr
   hdpePipe:     296,   // Sr 12 — HDPE pipe 110 mm dia (push-pull only)
   pushPull:     456,   // Sr 13 — laying by Push & Pull method
-  moulding:    3957,   // Sr 14 — moulding of cable joints
+  moulding:    3957,   // Sr 14 — moulding of cable joints (Rural area — kept as the default)
+  // Moulding of cable joint (St. joint / Indoor / Outdoor) for XLPE cable has a
+  // separate labour rate for Rural and Urban areas. Only the rate differs; the
+  // quantity logic is identical. Selected via ugState.areaType.
+  mouldingRural: 3957,
+  mouldingUrban: 3258,
   routeMarker:  148,   // Sr 16 — route marker, approx 1 per 100 Mtr
   bricks:        95,   // Supply & fixing of bricks, per Mtr — LOOP only
 
-  // ---- OLD FORMAT (imported from the earlier UG sheet) — used when
-  //      ugState.labFormat === 'OLD'. Some offices prefer this layout. ----
+  // ---- COMBINED LABOUR WORK rates (labFormat === 'OLD') ----
+  //      Single combined laying rate per Mtr instead of itemised activities. ----
   layNormalSingle: 533,      // D20
   layNormalDouble: 461,      // D21 (per Mtr, discounted — both cables share one trench)
   layTarSingle:    583,      // D23
@@ -12382,7 +12387,8 @@ function defaultUGState(){
     cableType: 'DOUBLE',      // 'SINGLE' | 'DOUBLE' — Double doubles On-Pole & Loop qty
     landType: 'NORMAL',       // 'NORMAL' | 'TAR' — applies to Excavation-laid length only
     ownership: 'COMPANY',     // 'COMPANY' | 'PARTY'
-    labFormat: 'NEW',         // 'NEW' (Master_Data_Check_UG, default) | 'OLD' (imported earlier UG labour layout)
+    labFormat: 'NEW',         // 'NEW' = Separate Labour Work (itemised, default) | 'OLD' = Combined Labour Work
+    areaType: 'RURAL',        // 'RURAL' | 'URBAN' — changes the moulding labour rate only
     excavation: 0,            // Mtr — By Excavation (UG Cable on Trench)
     boaring: 0,               // Mtr — By Push Pull Method (Boaring)
     supportStructures: [ {poleType:'11RSJ', poleQty:0} ], // multiple support structure rows allowed
@@ -12393,6 +12399,13 @@ function defaultUGState(){
   };
 }
 
+// Moulding labour rate depends on the selected area type (Rural / Urban).
+// Only the rate changes — quantity logic is identical in both labour methods.
+function ugMouldingRate(){
+  return (ugState && ugState.areaType === 'URBAN')
+    ? UG_LAB_RATE.mouldingUrban
+    : UG_LAB_RATE.mouldingRural;
+}
 let ugState = defaultUGState();
 try {
   const raw = localStorage.getItem(UG_STATE_LS_KEY);
@@ -12776,11 +12789,11 @@ function computeUG(){
     labLine('sandDouble',   'Supply of sand 0.300 x 0.750 x 1.00 Mtr', 'RMTR', q11, UG_LAB_RATE.sandDouble),
     labLine('hdpePipe',     'Supply of HDPE pipe for laying 11KV XLPE cable, 110 mm nominal diameter &amp; 5.3 to 6 mm thickness as per IS:4984', 'RMTR', q12, UG_LAB_RATE.hdpePipe),
     labLine('pushPull',     'Laying of U/G 11KV XLPE cable by Push &amp; Pull method', 'MTR', q13, UG_LAB_RATE.pushPull),
-    labLine('moulding',     'Moulding of cable joint (St. joint, Indoor and Outdoor) for XLPE cable — labour charges, for Rural area.', 'No.', q14, UG_LAB_RATE.moulding),
+    labLine('moulding',     `Moulding of cable joint (St. joint, Indoor and Outdoor) for XLPE cable — labour charges, for ${s.areaType === 'URBAN' ? 'Urban' : 'Rural'} area.`, 'No.', q14, ugMouldingRate()),
     labLine('routeMarker',  'Providing, supplying &amp; fixing route marker at distance approx. one No. per 100 Mtr', 'No.', q16, UG_LAB_RATE.routeMarker),
   ];
   } else {
-  // ── OLD FORMAT (imported from the earlier UG sheet) ──
+  // ── COMBINED LABOUR WORK (single combined laying rate per Mtr) ──
   // Excavation route length split by land type (Normal / Tar) and cable type.
   // Double Cable bills 2× the entered Excavation qty on the laying lines.
   let e20=0,e21=0,e23=0,e25=0;
@@ -12808,7 +12821,7 @@ function computeUG(){
     labLine('boaring',         'Laying by Push &amp; Pull method (HDD Machine) thru HDPE pipe 110mm dia — Boaring', 'Mtr', e33, UG_LAB_RATE.hddBoring),
     labLine('loopSingle',      'Loop of Single Cable — Bricks for mechanical protection', 'Mtr', e35, UG_LAB_RATE.loopBrickSingle),
     labLine('loopDouble',      'Loop of Double Cable — Bricks for mechanical protection (× 2)', 'Mtr', e36, UG_LAB_RATE.loopBrickDouble),
-    labLine('moulding',        'Moulding of Cable joint (St. joint / Indoor / Outdoor) for XLPE cable', 'No', e38, UG_LAB_RATE.moulding),
+    labLine('moulding',        `Moulding of Cable joint (St. joint / Indoor / Outdoor) for XLPE cable — ${s.areaType === 'URBAN' ? 'Urban' : 'Rural'} area`, 'No', e38, ugMouldingRate()),
     labLine('routeMarker',     'Providing &amp; fixing route marker (1 per 100 Mtr of cable laying)', 'No', e40, UG_LAB_RATE.routeMarker),
     labLine('digitalMap',      'Digital map of UG network — GPS capture &amp; superimposing', 'Km', e42, UG_LAB_RATE.digitalMap),
     labLine('giPipe',          'Supply of medium grade GI Pipe 4" dia (incl. clamping), 3 Mtr piece', 'Mtr', e44, UG_LAB_RATE.giPipeOld),
@@ -12882,14 +12895,20 @@ function renderUGInputPanel(){
     </div>
 
     <div class="row2">
-      <div class="field"><label>Labour (Part B) Format</label>
+      <div class="field"><label>Labour (Part B) Method</label>
         <select onchange="onUGLabFormat(this.value)">
-          <option value="NEW" ${s.labFormat!=='OLD'?'selected':''}>New Format (Master Data — detailed 16-line)</option>
-          <option value="OLD" ${s.labFormat==='OLD'?'selected':''}>Old Format (earlier 12-line layout)</option>
+          <option value="NEW" ${s.labFormat!=='OLD'?'selected':''}>Separate Labour Work</option>
+          <option value="OLD" ${s.labFormat==='OLD'?'selected':''}>Combined Labour Work</option>
         </select>
-        <div class="hint">Some offices use the older UG labour layout. Switch here — Part A (material) is unaffected; only the Part B labour lines change.</div>
+        <div class="hint">Two accepted practices for UG labour. <b>Separate Labour Work</b> itemises each activity (excavation, sand, bricks, tape, pipe, etc.) on its own line. <b>Combined Labour Work</b> bills a single combined laying rate per Mtr. Part A (material) is identical in both — only the Part B labour lines change.</div>
       </div>
-      <div class="field"></div>
+      <div class="field"><label>Area Type (Moulding rate)</label>
+        <select onchange="onUGAreaType(this.value)">
+          <option value="RURAL" ${s.areaType!=='URBAN'?'selected':''}>Rural Area</option>
+          <option value="URBAN" ${s.areaType==='URBAN'?'selected':''}>Urban Area</option>
+        </select>
+        <div class="hint">Moulding of cable joint (St. joint / Indoor / Outdoor) for XLPE cable carries a different labour rate in Rural and Urban areas. Only that rate changes — all quantities and other lines stay the same.</div>
+      </div>
     </div>
 
     <h3>2. Type of Support Structure, Outdoor &amp; Cable used = Loop + On pole</h3>
@@ -12985,9 +13004,19 @@ function updateUGQtyTotalsDisplay(){
 
 function onUGSel(key, val){ ugState[key] = val; saveUGState(); updateUGResults(); updateUGQtyTotalsDisplay(); }
 function onUGCount(key, val){ ugState[key] = parseFloat(val)||0; saveUGState(); updateUGResults(); updateUGQtyTotalsDisplay(); }
-// Switch the UG labour (Part B) layout between the detailed NEW format and the
-// imported OLD format. Rebuilds the results table and refreshes any live sheets
-// that carry the UG grand total (Estimate Part A, Material Statement, UG print).
+// Switch the UG labour (Part B) method between "Separate Labour Work" (NEW,
+// itemised) and "Combined Labour Work" (OLD, single combined laying rate).
+// Rebuilds the results table and refreshes any live sheets that carry the UG
+// grand total (Estimate Part A, Material Statement, UG print).
+function onUGAreaType(val){
+  ugState.areaType = (val === 'URBAN') ? 'URBAN' : 'RURAL';
+  saveUGState();
+  updateUGResults();
+  updateUGQtyTotalsDisplay();
+  try { if (typeof renderEstimateSheet === 'function' && document.getElementById('estimate-sheet')) renderEstimateSheet(); } catch(e){}
+  try { if (typeof buildUGSheet === 'function' && document.getElementById('ug-sheet')) buildUGSheet(); } catch(e){}
+  try { if (typeof renderMaterialStatement === 'function' && document.getElementById('material-statement-sheet')) renderMaterialStatement(); } catch(e){}
+}
 function onUGLabFormat(val){
   ugState.labFormat = (val === 'OLD') ? 'OLD' : 'NEW';
   ugState.labAdj = {};   // manual adjustments are keyed per line; clear on format switch
