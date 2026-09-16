@@ -2437,8 +2437,7 @@ table.est tr.tot-row td{font-weight:bold;background:#f5f5f5;}
     <td class="num" id="ug_lab_amt_giPipe">₹ 0.00</td></tr>
           <tr class="subtot"><td colspan="7">Sub Total</td><td class="num" id="ug_lab_subtot">₹ 1,462.00</td></tr>
           <tr class="subtot"><td colspan="7">15% Supervision Charges</td><td class="num" id="ug_lab_super">₹ 219.30</td></tr>
-          <tr class="subtot"><td colspan="7">18% GST Charges</td><td class="num" id="ug_lab_gst">₹ 263.16</td></tr>
-          <tr class="subtot" style="background:#d0dff4;"><td colspan="7"><b>Total — B</b></td><td class="num" id="ug_lab_final"><b>₹ 1,944.46</b></td></tr>
+          <tr class="subtot" style="background:#d0dff4;"><td colspan="7"><b>Total — B</b></td><td class="num" id="ug_lab_final"><b>₹ 1,681.30</b></td></tr>
         </tbody>
         <tfoot><tr class="grandtot"><td colspan="7"><b>GRAND TOTAL (A + B)</b></td><td class="num" id="ug_grand"><b>₹ 1,944.46</b></td></tr></tfoot>
       </table></div>
@@ -2503,11 +2502,10 @@ table.est tr.tot-row td{font-weight:bold;background:#f5f5f5;}
       <tr><td class="center">1</td><td class="center">—</td><td>Digital map of UG network — GPS capture &amp; superimposing</td><td class="center">1</td><td class="center">Km</td><td class="num">1,462.00</td><td class="num">1,462.00</td></tr>
       <tr class="tot-row"><td colspan="6">Sub Total</td><td class="num">₹ 1,462.00</td></tr>
       <tr class="tot-row"><td colspan="6">15% Supervision Charges</td><td class="num">₹ 219.30</td></tr>
-      <tr class="tot-row"><td colspan="6">18% GST Charges</td><td class="num">₹ 263.16</td></tr>
-      <tr class="tot-row" style="background:#cde;"><td colspan="6"><b>PART B: TOTAL</b></td><td class="num"><b>₹ 1,944.46</b></td></tr>
+      <tr class="tot-row" style="background:#cde;"><td colspan="6"><b>PART B: TOTAL</b></td><td class="num"><b>₹ 1,681.30</b></td></tr>
     </tbody>
     <tfoot>
-      <tr class="grand-row"><td colspan="6"><b>TOTAL ( A + B )</b></td><td class="num"><b>₹ 1,944.46</b></td></tr>
+      <tr class="grand-row"><td colspan="6"><b>TOTAL ( A + B )</b></td><td class="num"><b>₹ 1,681.30</b></td></tr>
     </tfoot>
   </table>
   <div class="signoff">
@@ -12829,7 +12827,7 @@ function computeUG(){
   }
   const labTotal = labLines.reduce((sum,l)=>sum+l.amt, 0);              // F46 (reflects manual adjustments)
   const labSuper = labTotal * 0.15;                                     // F47 — 15% Supervision, always (Party or Company)
-  const labGST   = labTotal * 0.18;                                     // 18% GST on Labour only (not on Supervision)
+  const labGST   = 0;                                                    // GST on Labour removed for UG cable work
   const labFinal = labTotal + labSuper + labGST;                        // F48
 
   const grand = matFinal + labFinal;                                    // F50
@@ -13077,7 +13075,6 @@ function updateUGResults(){
         <tbody>${labRowsAll}
           <tr class="subtot"><td colspan="7">Sub Total</td><td class="num" id="ug_lab_subtot">₹ ${fmt(c.labTotal)}</td></tr>
           <tr class="subtot"><td colspan="7">15% Supervision Charges</td><td class="num" id="ug_lab_super">₹ ${fmt(c.labSuper)}</td></tr>
-          <tr class="subtot"><td colspan="7">18% GST Charges</td><td class="num" id="ug_lab_gst">₹ ${fmt(c.labGST)}</td></tr>
           <tr class="subtot" style="background:#d0dff4;"><td colspan="7"><b>Total — B</b></td><td class="num" id="ug_lab_final"><b>₹ ${fmt(c.labFinal)}</b></td></tr>
         </tbody>
         <tfoot><tr class="grandtot"><td colspan="7"><b>GRAND TOTAL (A + B)</b></td><td class="num" id="ug_grand"><b>₹ ${fmt(c.grand)}</b></td></tr></tfoot>
@@ -13102,7 +13099,6 @@ function patchUGLabSummary(c){
   const set = (id,html)=>{ const e=g(id); if(e) e.innerHTML = html; };
   set('ug_lab_subtot', '₹ '+fmt(c.labTotal));
   set('ug_lab_super', '₹ '+fmt(c.labSuper));
-  set('ug_lab_gst', '₹ '+fmt(c.labGST));
   set('ug_lab_final', '<b>₹ '+fmt(c.labFinal)+'</b>');
   patchUGGrand(c);
 }
@@ -13179,7 +13175,6 @@ function buildUGSheet(){
       ${rows_b}
       <tr class="tot-row"><td colspan="6">Sub Total</td><td class="num">₹ ${fmt(c.labTotal)}</td></tr>
       <tr class="tot-row"><td colspan="6">15% Supervision Charges</td><td class="num">₹ ${fmt(c.labSuper)}</td></tr>
-      <tr class="tot-row"><td colspan="6">18% GST Charges</td><td class="num">₹ ${fmt(c.labGST)}</td></tr>
       <tr class="tot-row" style="background:#cde;"><td colspan="6"><b>PART B: TOTAL</b></td><td class="num"><b>₹ ${fmt(c.labFinal)}</b></td></tr>
     </tbody>
     <tfoot>
