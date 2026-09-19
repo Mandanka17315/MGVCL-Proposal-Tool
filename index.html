@@ -3257,12 +3257,34 @@ table.est tr.tot-row td{font-weight:bold;background:#f5f5f5;}
 <script>
 function printSet(mode) {
   // Sheets to print for each mode
-  const wt = isWorkType(state.applicant.srType);
+  const srType = state.applicant.srType;
+  const wt = isWorkType(srType);
   const sets = {
     proposal:     wt ? ['estimate-tab','officenote-tab','proposal-tab'] : ['estimate-tab','officenote-tab','proposal-tab','nodue-tab'],
     techsanction: wt ? ['estimate-tab','officenote-tab','techsanction-tab'] : ['estimate-tab','officenote-tab','nodue-tab','techsanction-tab']
   };
-  const toShow = sets[mode] || [];
+  const toShow = (sets[mode] || []).slice();
+
+  // Attach the detailed work sheet to a work-type print set so the item-wise
+  // material + labour breakdown prints along with the proposal / TS:
+  //   • Maintenance Work        → Annexure-1 (annexure-tab)
+  //   • Underground Cable Work  → UG Annexure-1 (ug-tab)
+  // Each of these tabs has an on-screen "entry" sub-view and a "print"
+  // sub-view; we switch it to print (which renders the sheet) before printing
+  // and restore the sub-view afterwards.
+  const restoreSub = [];   // {show, arg} to run after print
+  if (srType === 'Maintenance Work' && typeof showAnnexSub === 'function') {
+    toShow.push('annexure-tab');
+    const wasPrint = document.getElementById('annex-sub-print')?.classList.contains('active');
+    showAnnexSub('print');
+    restoreSub.push(() => showAnnexSub(wasPrint ? 'print' : 'entry'));
+  } else if (srType === 'Underground Cable Work' && typeof showUGSub === 'function') {
+    toShow.push('ug-tab');
+    const wasPrint = document.getElementById('ug-sub-print')?.classList.contains('active');
+    showUGSub('print');
+    restoreSub.push(() => showUGSub(wasPrint ? 'print' : 'entry'));
+  }
+
   const allTabs = Array.from(document.querySelectorAll('.tabsection'));
   const wasActive = allTabs.map(t => t.classList.contains('active'));
   // Show only the sheets in this set
@@ -3276,6 +3298,7 @@ function printSet(mode) {
     window.print();
     // Restore original active state after print dialog closes
     allTabs.forEach((t, i) => t.classList.toggle('active', wasActive[i]));
+    restoreSub.forEach(fn => { try { fn(); } catch(e){} });
   }));
 }
 </script>
@@ -3800,7 +3823,19 @@ function loadRegisterRow(idx) {
   if (parsed._maint && typeof parsed._maint === 'object') {
     const m = parsed._maint;
     entryRows = Array.isArray(m.entryRows) ? m.entryRows : [];
-    entryRowSeq = entryRows.length;
+    // Self-heal legacy saves: give any row a fresh unique rowId if it is
+    // missing one or clashes with a row already seen, so no two rows share
+    // a DOM id after restore.
+    (function(){
+      let seq = 0; const seen = {};
+      entryRows.forEach(r=>{
+        if(!r) return;
+        const cur = String(r.rowId || '');
+        if(!/^er\d+$/.test(cur) || seen[cur]) r.rowId = 'er' + (++seq + 100000);
+        seen[r.rowId] = true;
+      });
+    })();
+    entryRowSeq = 0; syncEntryRowSeq();   // seed past the highest existing rowId, not the row count
     // qty is a const object — clear in place then repopulate.
     Object.keys(qty).forEach(k => delete qty[k]);
     if (m.qty && typeof m.qty === 'object') Object.assign(qty, m.qty);
@@ -4164,17 +4199,37 @@ function renderRegisterTab() {
 // ══════════════════════════════════════════════════════════════════
 const TS_THRESHOLD = 800000;   // ₹8,00,000 — at or below → TS; above → Proposal to Division
 
-function combinedDocSet(total){
+function combinedDocSet(total, srType){
   const aboveThreshold = (+total || 0) > TS_THRESHOLD;
-  const docs = [
-    { id:'estimate-sheet',    label:'Estimate Sheet' },
-    { id:'nodue-sheet',       label:'No Due Certificate' },
-    { id:'officenote-sheet',  label:'Office Note' },
-  ];
+  const wt = (typeof isWorkType === 'function') && isWorkType(srType);
+  const docs = [ { id:'estimate-sheet', label:'Estimate Sheet' } ];
+  // No Due Certificate does not apply to work-type proposals (Maintenance /
+  // MVCC / UG) — that tab is hidden for them, so leave it out of their set.
+  if(!wt) docs.push({ id:'nodue-sheet', label:'No Due Certificate' });
+  docs.push({ id:'officenote-sheet', label:'Office Note' });
   docs.push(aboveThreshold
     ? { id:'proposal-sheet',    label:'Proposal to Division' }
     : { id:'techsanction-sheet', label:'Technical Sanction' });
+  // Attach the item-wise work sheet for the work types that have one, so the
+  // full breakdown prints with the proposal / TS.
+  if(srType === 'Maintenance Work'){
+    ensureDetailSheet('annex');
+    docs.push({ id:'annex-sheet', label:'Annexure-1 (Material & Labour)' });
+  } else if(srType === 'Underground Cable Work'){
+    ensureDetailSheet('ug');
+    docs.push({ id:'ug-sheet', label:'UG Cable Work — Annexure-1' });
+  }
   return { docs, aboveThreshold };
+}
+
+// Render a detail sheet into the DOM so stageCombinedPrint() can clone it.
+// The printable Annexure-1 / UG sheets are only built when their "print"
+// sub-view is shown, so a set print must build them explicitly first.
+function ensureDetailSheet(which){
+  try {
+    if(which === 'annex' && typeof buildAnnexSheet === 'function') buildAnnexSheet();
+    if(which === 'ug'    && typeof buildUGSheet    === 'function') buildUGSheet();
+  } catch(e){}
 }
 
 function printRegisterCombined(idx){
@@ -4199,6 +4254,8 @@ function printRegisterCombined(idx){
   try { const c = computeEstimate(); if(c && isFinite(c.say)) recomputed = c.say; } catch(e){}
   if(recomputed !== null && recomputed > 0) total = recomputed;
 
+  const srTypeReg = (state && state.applicant && state.applicant.srType) || row.srType || '';
+
   // If the two disagree materially, say so rather than picking silently.
   let mismatchNote = '';
   if(recomputed !== null && stored > 0 && Math.abs(recomputed - stored) > 1){
@@ -4208,7 +4265,7 @@ function printRegisterCombined(idx){
       : `\n⚠ This entry could not be fully recomputed (rates or saved data may be incomplete);\n   using the stored value ${f(stored)}. Verify before signing.\n`;
   }
 
-  const { docs, aboveThreshold } = combinedDocSet(total);
+  const { docs, aboveThreshold } = combinedDocSet(total, srTypeReg);
   const missing = docs.filter(d => !document.getElementById(d.id));
   if(missing.length){
     alert('Cannot print — these sheets are missing from the page:\n\n' +
@@ -4240,7 +4297,8 @@ function printCurrentCombined(){
   let total = 0;
   try { const c = computeEstimate(); if(c && isFinite(c.say)) total = c.say; } catch(e){}
 
-  const { docs, aboveThreshold } = combinedDocSet(total);
+  const srTypeCur = (state && state.applicant && state.applicant.srType) || '';
+  const { docs, aboveThreshold } = combinedDocSet(total, srTypeCur);
   const missing = docs.filter(d => !document.getElementById(d.id));
   if(missing.length){
     alert('Cannot print — these sheets are missing:\n\n' + missing.map(m=>'• '+m.label).join('\n'));
@@ -11541,6 +11599,22 @@ function customLabTotal(){ return r2(customLabRows.reduce((s,r)=>s+r2(r.qty*r.ra
 let entryRows = [];
 let entryRowSeq = 0;
 
+// Re-seed entryRowSeq from the HIGHEST numeric suffix present in the current
+// rows (e.g. 'er12' -> 12), not from the row COUNT. Seeding from the count
+// (as an earlier version did on load/restore) could re-issue a rowId that a
+// surviving row still holds, producing duplicate DOM ids. Duplicate ids made
+// document.getElementById() return the wrong row, so newly added rows looked
+// dead ("no entry possible after ~12 rows") and existing rows appeared to go
+// blank whenever a new line was added. Always advance past the current max.
+function syncEntryRowSeq(){
+  let mx = 0;
+  entryRows.forEach(r=>{
+    const n = parseInt(String(r && r.rowId || '').replace(/^er/, ''), 10);
+    if(!isNaN(n) && n > mx) mx = n;
+  });
+  if(entryRowSeq < mx) entryRowSeq = mx;
+}
+
 // ══════════════════════════════════════════════════════════════════
 //  V4 — Keyboard-first entry on the Maintenance Entry table
 //  Enter / ↓ moves to the next quantity box, Shift+Enter / ↑ moves
@@ -11613,6 +11687,7 @@ function buildEntryTable(){
 
 function addEntryRow(){
   annexDirty = true;
+  syncEntryRowSeq();              // never re-issue an id a surviving row still holds
   entryRowSeq++;
   entryRows.push({rowId:'er'+entryRowSeq, workId:'', qty:0, tcCap:'BELOW'});
   renderEntryTable();
