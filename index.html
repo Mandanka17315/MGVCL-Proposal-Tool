@@ -1333,6 +1333,9 @@ table.est tr.tot-row td{font-weight:bold;background:#f5f5f5;}
         <button class="btn primary" onclick="window.print()">🖶 Print This Sheet Only</button>
         
         <button class="btn" onclick="exportSheetAsWord(&#39;officenote-sheet&#39;,&#39;OfficeNote&#39;)">📄 Export Word</button>
+        <span style="margin-left:14px;font-size:11.5px;color:var(--muted);">Signatory:</span>
+        <button class="btn sm proposal-level-btn active" id="pl-btn4-SDN" onclick="setProposalLevel(&#39;SDN&#39;)" title="Proposed by Junior Engineer, approved by Deputy Engineer — Sub Division Office">FOR SUB DIVISION</button>
+        <button class="btn sm proposal-level-btn" id="pl-btn4-DIVISION" onclick="setProposalLevel(&#39;DIVISION&#39;)" title="Proposed by JE / DE, approved by Executive Engineer — Division Office">FOR DIVISION</button>
       </div>
       <div id="officenote-sheet" class="sheet">
     
@@ -8415,6 +8418,7 @@ function setProposalLevel(level){
   const b1 = document.getElementById('pl-btn-'+level);   if (b1) b1.classList.add('active');
   const b2 = document.getElementById('pl-btn2-'+level);  if (b2) b2.classList.add('active');
   const b3 = document.getElementById('pl-btn3-'+level);  if (b3) b3.classList.add('active');
+  const b4 = document.getElementById('pl-btn4-'+level);  if (b4) b4.classList.add('active');
   // The PERFORMA 13-B signatories follow this same switch, so re-render the
   // estimate sheet too. renderEstimateSheet() re-renders the proposal, technical
   // sanction and office note sheets itself, so they are covered.
@@ -8439,6 +8443,7 @@ function renderProposalSheet() {
   const activeBtn1 = document.getElementById('pl-btn-'+(a.proposalLevel||'SDN'));   if (activeBtn1) activeBtn1.classList.add('active');
   const activeBtn2 = document.getElementById('pl-btn2-'+(a.proposalLevel||'SDN'));  if (activeBtn2) activeBtn2.classList.add('active');
   const activeBtn3 = document.getElementById('pl-btn3-'+(a.proposalLevel||'SDN'));  if (activeBtn3) activeBtn3.classList.add('active');
+  const activeBtn4 = document.getElementById('pl-btn4-'+(a.proposalLevel||'SDN'));  if (activeBtn4) activeBtn4.classList.add('active');
 
   // Build major works rows from computed estimate
   let srNo = 1;
@@ -9321,6 +9326,7 @@ function renderTechSanctionSheet() {
   const activeBtn1 = document.getElementById('pl-btn-'+(a.proposalLevel||'SDN'));   if (activeBtn1) activeBtn1.classList.add('active');
   const activeBtn2 = document.getElementById('pl-btn2-'+(a.proposalLevel||'SDN'));  if (activeBtn2) activeBtn2.classList.add('active');
   const activeBtn3 = document.getElementById('pl-btn3-'+(a.proposalLevel||'SDN'));  if (activeBtn3) activeBtn3.classList.add('active');
+  const activeBtn4 = document.getElementById('pl-btn4-'+(a.proposalLevel||'SDN'));  if (activeBtn4) activeBtn4.classList.add('active');
 
   // "Technical sanction is hereby accorded to Junior Engineer ... for the
   // works of giving power supply to ... (tariff) ... connection details as
@@ -9407,10 +9413,30 @@ function renderOfficeNoteSheet() {
   const { letterhead, regTable, workTable, subjectLine, subDivLabel, today } = buildLetterParts(a, c);
   const subDiv = a.subDivision || '____';
 
+  // Signatory level (shared FOR SUB DIVISION / FOR DIVISION switch, same as the
+  // Main Estimate Sheet). FOR DIVISION: Division Office letterhead, proposed by
+  // JE / DE and approved by the Executive Engineer.
+  const isDivLevel = a.proposalLevel === 'DIVISION';
+  const divName    = a.divisionOffice || '';
+  const officeLine = isDivLevel
+    ? (divName ? `${escapeHtml(divName)} Division Office` : 'Division Office')
+    : (a.subDivision ? `${escapeHtml(a.subDivision)} Sub Division Office` : 'Sub Division Office');
+  const noteLetterhead = letterHead('', officeLine);
+  const refOffice      = isDivLevel ? (divName || subDiv) : subDiv;
+  const proposedRole   = isDivLevel ? 'JE / DE,' : 'Junior Engineer,';
+  const proposedOffice = isDivLevel ? officeLine : `${escapeHtml(subDiv)} Sub Division`;
+  const dySaOffice     = isDivLevel ? officeLine : escapeHtml(subDivLabel);
+  const approverRole   = isDivLevel ? 'Executive Engineer,' : 'Deputy Engineer,';
+  const approverOffice = isDivLevel ? officeLine : `${escapeHtml(subDiv)} Sub Division`;
+  document.querySelectorAll('.proposal-level-btn').forEach(b => b.classList.remove('active'));
+  ['pl-btn-','pl-btn2-','pl-btn3-','pl-btn4-'].forEach(p => {
+    const b = document.getElementById(p + (a.proposalLevel || 'SDN')); if (b) b.classList.add('active');
+  });
+
   el.innerHTML = `
-    ${letterhead}
+    ${noteLetterhead}
     <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:8px;">
-      <span>MGVCL/${escapeHtml(subDiv)}/Office Note/</span>
+      <span>MGVCL/${escapeHtml(refOffice)}/Office Note/</span>
       <span>Date: ____________</span>
     </div>
 
@@ -9446,21 +9472,21 @@ function renderOfficeNoteSheet() {
         <div style="margin-bottom:32px;"></div>
         <div>____________________________</div>
         <div><b>Proposed by</b></div>
-        <div>Junior Engineer,</div>
-        <div>${escapeHtml(subDiv)} Sub Division</div>
+        <div>${proposedRole}</div>
+        <div>${proposedOffice}</div>
       </div>
       <div style="text-align:center;flex:1;">
         <div style="margin-bottom:32px;"></div>
         <div>____________________________</div>
         <div><b>Dy. SA</b></div>
-        <div>${escapeHtml(subDivLabel)}</div>
+        <div>${dySaOffice}</div>
       </div>
       <div style="text-align:center;flex:1;">
         <div style="margin-bottom:32px;"></div>
         <div>____________________________</div>
         <div><b>Approved by</b></div>
-        <div>Deputy Engineer,</div>
-        <div>${escapeHtml(subDiv)} Sub Division</div>
+        <div>${approverRole}</div>
+        <div>${approverOffice}</div>
       </div>
     </div>
   `;
