@@ -3330,20 +3330,28 @@ function printSet(mode) {
 const BUNDLE = JSON.parse(document.getElementById('data-bundle').textContent);
 const RATE_DATA = BUNDLE.cost;    // {RE,GIDC,HT_ABC,LT_ABC,MVCC,UG} each: {item,base,pole,code,desc,cost,unit}
 
-// RE cost data stops at 100 KVA (PSC). 200 KVA and 500 KVA Plinth Mounted
-// transformer centres are added to RE using the City-GIDC Cost Data 2024-25
-// (Index 04-06-25) item codes and rates, so they can be proposed — and used
-// in Augmentation / De-augmentation — from the RE table as well. Their
-// material/labour segregation comes from PARTAB_DETAIL via the item code.
+// RE cost data has PSC-pole TCs only. Plinth Mounted TC centres of every
+// capacity (25 / 63 / 100 / 200 / 500 KVA) are added to RE using the
+// City-GIDC Cost Data 2024-25 (Index 04-06-25) item codes and rates — copied
+// from the GIDC table so there is one source — so they can be proposed and
+// used in Augmentation / De-augmentation from the RE table as well. They go
+// AFTER all PSC TCs, so picking e.g. "TC 25 KVA" in RE still defaults to PSC.
+// Material/labour segregation comes from PARTAB_DETAIL via the item code.
 (function addRePlinthTCs(){
   const re = RATE_DATA.RE || (RATE_DATA.RE = []);
-  const add = [
-    { base:'TC 200 KVA - Plinth', code:'9602000129', cost:786014,
-      desc:'11/0.433 KV 200 KVA DIST. TRANSFORMER CENTRE (PLINTH MOUNTED)' },
-    { base:'TC 500 KVA - Plinth', code:'9602000130', cost:2960926,
-      desc:'11/0.433 KV 500 KVA DIST. TRANSFORMER CENTRE (PLINTH MOUNTED)' },
-  ].filter(a => !re.some(i => i.code === a.code))
-   .map(a => ({ item:a.desc, base:a.base, pole:'Plinth Mounted', code:a.code, desc:a.desc, unit:'Nos.', cost:a.cost }));
+  const fallback = {
+    '9602000252': { kva:25,  cost:329292,  desc:'11/0.433 KV 25 KVA DIST. TRANSFORMER CENTRE (PLINTH MOUNTED)' },
+    '9602000253': { kva:63,  cost:401246,  desc:'11/0.433 KV 63 KVA DIST. TRANSFORMER CENTRE (PLINTH MOUNTED)' },
+    '9602000254': { kva:100, cost:486410,  desc:'11/0.433 KV 100 KVA DIST. TRANSFORMER CENTRE (PLINTH MOUNTED)' },
+    '9602000129': { kva:200, cost:786014,  desc:'11/0.433 KV 200 KVA DIST. TRANSFORMER CENTRE (PLINTH MOUNTED)' },
+    '9602000130': { kva:500, cost:2960926, desc:'11/0.433 KV 500 KVA DIST. TRANSFORMER CENTRE (PLINTH MOUNTED)' },
+  };
+  const add = Object.keys(fallback).filter(code => !re.some(i => i.code === code)).map(code => {
+    const g = (RATE_DATA.GIDC || []).find(i => i.code === code);
+    const f = fallback[code];
+    return { item: (g && g.desc) || f.desc, base: `TC ${f.kva} KVA`, pole: 'Plinth Mounted', code,
+             desc: (g && g.desc) || f.desc, unit: 'Nos.', cost: g ? g.cost : f.cost };
+  });
   if (!add.length) return;
   let at = -1;
   re.forEach((i, idx) => { if (/^TC\s+\d+/.test(i.base)) at = idx; });
@@ -3465,7 +3473,7 @@ const state = {
   },
   partA: [],   // {id, category:'RE'|'GIDC'|'HT ABC'|'MVCC'|'UG', base, pole, key, qty}
   partB: [],   // {id, base, pole, key, qty}
-  augItems: [],      // {id, table:'RE'|'GIDC', pole, fromBase, toBase, qty}
+  augItems: [],      // {id, table:'RE'|'GIDC', fromPole, fromBase, toPole, toBase, qty}  (pole = legacy single pole)
   customPartA: [],   // {id, code, desc, unit, rate, qty} — user-defined extra items for Part A
   customPartB: [],   // {id, code, desc, unit, rate, qty} — user-defined extra items for Part B
   sketchForm: {
@@ -7586,7 +7594,7 @@ function renderEstimateForm() {
     renderPartBRows(); renderEstimateSheet();
   });
   document.getElementById('aug-add').addEventListener('click', () => {
-    state.augItems.push({ id: uid(), table: 'RE', pole: 'PSC Pole', fromBase: '', toBase: '', qty: 1 });
+    state.augItems.push({ id: uid(), table: 'RE', pole: 'PSC Pole', fromPole: 'PSC Pole', toPole: 'PSC Pole', fromBase: '', toBase: '', qty: 1 });
     renderAugRows(); renderEstimateSheet();
   });
   document.getElementById('partA-custom-add').addEventListener('click', () => {
@@ -7752,7 +7760,7 @@ function renderPartARows() {
         </div>
         <div>
           <span class="mini-label">Pole type</span>
-          ${row.category === 'RE'
+          ${row.category === 'RE' && poleChoices.length <= 1
             ? `<select class="pa-pole" disabled><option>${escapeHtml((item && item.pole) || 'PSC Pole')}</option></select>`
             : `<select class="pa-pole" ${!row.base ? 'disabled' : ''}>
                 <option value="">— select —</option>
@@ -7874,36 +7882,46 @@ function renderPartBRows() {
 function augType(row) {
   // Extract KVA number from base labels like "TC 25 KVA", "TC 5 KVA - Single PSC"
   const kvaOf = base => { const m = base && base.match(/TC\s+(\d+)/); return m ? parseInt(m[1]) : 0; };
-  return kvaOf(row.toBase) < kvaOf(row.fromBase) ? 'DEAUG' : 'AUG';
+  const f = kvaOf(row.fromBase), t = kvaOf(row.toBase);
+  if (t < f) return 'DEAUG';
+  if (t === f && row.fromBase && row.toBase) return 'SHIFT';   // same KVA, pole → plinth etc.
+  return 'AUG';
 }
 
-// Find the TC item for an augmentation row. GIDC has the same base (e.g.
-// "TC 200 KVA") on several poles, so the chosen pole must match. RE lists all
-// its TCs together (PSC + the 200/500 KVA Plinth entries, whose base names are
-// unique), so RE falls back to a base-only match.
+// ---- Augmentation helpers ----
+// Old TC and New TC each carry their OWN pole type (e.g. old 100 KVA on 9 Mtr
+// RSJ → new 200 KVA Plinth Mounted), stored as fromPole / toPole. Rows saved
+// before this change had a single `pole` (used for both), and a short-lived
+// RE base "TC n KVA - Plinth" — both are normalised here on load.
+function normAugRow(row) {
+  if (!row) return row;
+  const legacy = b => { const m = String(b||'').match(/^(TC\s+\d+\s+KVA)\s+-\s+Plinth$/i); return m ? m[1] : null; };
+  if (row.fromPole === undefined) row.fromPole = row.pole || '';
+  if (row.toPole   === undefined) row.toPole   = row.pole || '';
+  const lf = legacy(row.fromBase); if (lf) { row.fromBase = lf; row.fromPole = 'Plinth Mounted'; }
+  const lt = legacy(row.toBase);   if (lt) { row.toBase   = lt; row.toPole   = 'Plinth Mounted'; }
+  const poles = tcPolesFor(row.table);
+  if (!poles.includes(row.fromPole)) row.fromPole = poles[0] || '';
+  if (!poles.includes(row.toPole))   row.toPole   = poles[0] || '';
+  row.pole = row.fromPole;   // kept for anything still reading the old field
+  return row;
+}
 function augTcItem(table, base, pole) {
   const cat = table === 'GIDC' ? 'GIDC' : 'RE';
   const arr = RATE_DATA[cat] || [];
   if (!base) return null;
-  return arr.find(i => i.base === base && i.pole === pole)
-      || (cat === 'RE' ? arr.find(i => i.base === base) : null)
-      || null;
+  return arr.find(i => i.base === base && i.pole === pole) || arr.find(i => i.base === base) || null;
 }
 function tcRateForBase(table, base, pole) {
   const item = augTcItem(table, base, pole);
   return item ? item.cost : 0;
 }
-
 function tcItemsFor(table, pole) {
   const cat = table === 'GIDC' ? 'GIDC' : 'RE';
-  // RE: every TC of the table (PSC Pole and Plinth Mounted) in one list, so a
-  // PSC TC can be augmented to a 200/500 KVA Plinth TC and back.
-  if (cat === 'RE') return (RATE_DATA.RE || []).filter(i => i.base.startsWith('TC'));
   return (RATE_DATA[cat] || []).filter(i => i.base.startsWith('TC') && i.pole === pole);
 }
 function tcPolesFor(table) {
   const cat = table === 'GIDC' ? 'GIDC' : 'RE';
-  if (cat === 'RE') return ['PSC Pole'];   // single combined list (see tcItemsFor)
   const seen = [];
   (RATE_DATA[cat] || []).filter(i => i.base.startsWith('TC')).forEach(i => {
     if (!seen.includes(i.pole)) seen.push(i.pole);
@@ -7914,16 +7932,21 @@ function tcPolesFor(table) {
 function renderAugRows() {
   const wrap = document.getElementById('aug-rows');
   wrap.innerHTML = state.augItems.map(row => {
+    normAugRow(row);
     const poles = tcPolesFor(row.table);
-    const tcItems = tcItemsFor(row.table, row.pole);
+    const fromItems = tcItemsFor(row.table, row.fromPole);
+    const toItems   = tcItemsFor(row.table, row.toPole);
     const type = augType(row);
-    const fromRate = tcRateForBase(row.table, row.fromBase, row.pole);
-    const toRate   = tcRateForBase(row.table, row.toBase, row.pole);
-    const amount   = (type === 'DEAUG' ? -1 : 1) * Math.abs(toRate - fromRate) * row.qty;
-    const typeLabel = type === 'AUG' ? 'Augmentation ↑' : 'De-augmentation ↓';
-    const typeColor = type === 'AUG' ? 'var(--ok-ink)' : 'var(--warn-ink)';
+    const fromRate = tcRateForBase(row.table, row.fromBase, row.fromPole);
+    const toRate   = tcRateForBase(row.table, row.toBase, row.toPole);
+    // Net = new TC centre − old TC centre (same as the estimate's two lines).
+    const amount   = (toRate - fromRate) * row.qty;
+    const typeLabel = type === 'AUG' ? 'Augmentation ↑' : type === 'DEAUG' ? 'De-augmentation ↓' : 'Shifting ↔';
+    const typeColor = type === 'DEAUG' ? 'var(--warn-ink)' : 'var(--ok-ink)';
+    const poleSel = (cls, val) => `<select class="${cls}">${poles.map(p => `<option value="${escapeAttr(p)}" ${val === p ? 'selected' : ''}>${escapeHtml(p)}</option>`).join('')}</select>`;
     return `
-      <div class="item-row" data-id="${row.id}" style="grid-template-columns:.7fr .9fr 1fr 1fr .6fr .9fr auto;">
+      <div class="item-row" data-id="${row.id}" style="grid-template-columns:.75fr 1.15fr 1.15fr 1fr;row-gap:8px;align-items:end;">
+        <!-- line 1: OLD transformer -->
         <div>
           <span class="mini-label">Table</span>
           <select class="aug-table">
@@ -7932,29 +7955,34 @@ function renderAugRows() {
           </select>
         </div>
         <div>
-          <span class="mini-label">Pole type</span>
-          <select class="aug-pole">
-            ${poles.map(p => `<option value="${escapeAttr(p)}" ${row.pole === p ? 'selected' : ''}>${escapeHtml(p)}</option>`).join('')}
-          </select>
+          <span class="mini-label">Old TC pole</span>
+          ${poleSel('aug-from-pole', row.fromPole)}
         </div>
         <div>
           <span class="mini-label">Old TC (From)</span>
           <select class="aug-from">
             <option value="">— select —</option>
-            ${tcItems.map(i => `<option value="${escapeAttr(i.base)}" ${row.fromBase === i.base ? 'selected' : ''}>${escapeHtml(i.base)}</option>`).join('')}
+            ${fromItems.map(i => `<option value="${escapeAttr(i.base)}" ${row.fromBase === i.base ? 'selected' : ''}>${escapeHtml(i.base)}</option>`).join('')}
           </select>
+        </div>
+        ${qtyControlHtml('aug-qty', row.qty, false)}
+        <!-- line 2: NEW transformer -->
+        <div style="font-size:11.5px;font-weight:700;color:${typeColor};padding-bottom:8px;">${row.fromBase && row.toBase ? typeLabel : '—'}</div>
+        <div>
+          <span class="mini-label">New TC pole</span>
+          ${poleSel('aug-to-pole', row.toPole)}
         </div>
         <div>
           <span class="mini-label">New TC (To)</span>
           <select class="aug-to">
             <option value="">— select —</option>
-            ${tcItems.map(i => `<option value="${escapeAttr(i.base)}" ${row.toBase === i.base ? 'selected' : ''}>${escapeHtml(i.base)}</option>`).join('')}
+            ${toItems.map(i => `<option value="${escapeAttr(i.base)}" ${row.toBase === i.base ? 'selected' : ''}>${escapeHtml(i.base)}</option>`).join('')}
           </select>
         </div>
-        ${qtyControlHtml('aug-qty', row.qty, false)}
-        <div style="padding-top:18px;font-size:11.5px;font-weight:700;color:${typeColor};">${row.fromBase && row.toBase ? typeLabel : '—'}</div>
-        <div class="amount-chip">₹ ${inr(amount)}</div>
-        <button class="remove-btn" title="Remove">×</button>
+        <div style="display:flex;align-items:center;justify-content:flex-end;gap:8px;">
+          <div class="amount-chip">₹ ${inr(amount)}</div>
+          <button class="remove-btn" title="Remove">×</button>
+        </div>
       </div>`;
   }).join('') || '<div class="hint">No augmentation / de-augmentation added.</div>';
 
@@ -7963,12 +7991,16 @@ function renderAugRows() {
     const row = state.augItems.find(r => r.id === id);
     rowEl.querySelector('.aug-table').addEventListener('change', e => {
       row.table = e.target.value;
-      row.pole = tcPolesFor(row.table)[0] || '';
+      row.pole = row.fromPole = row.toPole = tcPolesFor(row.table)[0] || '';
       row.fromBase = ''; row.toBase = '';
       renderAugRows(); renderEstimateSheet();
     });
-    rowEl.querySelector('.aug-pole').addEventListener('change', e => {
-      row.pole = e.target.value; row.fromBase = ''; row.toBase = '';
+    rowEl.querySelector('.aug-from-pole').addEventListener('change', e => {
+      row.pole = row.fromPole = e.target.value; row.fromBase = '';
+      renderAugRows(); renderEstimateSheet();
+    });
+    rowEl.querySelector('.aug-to-pole').addEventListener('change', e => {
+      row.toPole = e.target.value; row.toBase = '';
       renderAugRows(); renderEstimateSheet();
     });
     rowEl.querySelector('.aug-from').addEventListener('change', e => {
@@ -8131,10 +8163,11 @@ function computeEstimate() {
 
   const augRows = state.augItems.flatMap(r => {
     const cat = r.table === 'GIDC' ? 'GIDC' : 'RE';
-    const fromItem = augTcItem(cat, r.fromBase, r.pole);
-    const toItem   = augTcItem(cat, r.toBase,   r.pole);
+    normAugRow(r);
+    const fromItem = augTcItem(cat, r.fromBase, r.fromPole);
+    const toItem   = augTcItem(cat, r.toBase,   r.toPole);
     const type = augType(r);
-    const label = type === 'AUG' ? 'AUGMENTATION' : 'DE-AUGMENTATION';
+    const label = type === 'AUG' ? 'AUGMENTATION' : type === 'DEAUG' ? 'DE-AUGMENTATION' : 'SHIFTING';
     const oldRow = fromItem ? {
       code: fromItem.code, desc: `(OLD TC - ${label}) ${fromItem.desc}`,
       unit: 'Nos.', qty: r.qty, rate: -fromItem.cost, amount: -fromItem.cost * r.qty, isAugSub: true,
@@ -8444,6 +8477,8 @@ function renderObstructionNoticeSheet() {
   const sr      = a.eUrjaSR || blank;
   const appDate = a.regnDate ? formatDateDMY(a.regnDate) : blank;
   const subDiv  = a.subDivision || '______';
+  const appType = (typeof srTypeLabel === 'function' ? srTypeLabel(a) : '') || blank;   // Application type
+  const scheme  = a.scheme || blank;
   const guj = 'font-family:\'Nirmala UI\',\'Shruti\',\'Noto Sans Gujarati\',\'Segoe UI\',sans-serif;mso-bidi-font-family:\'Nirmala UI\';';
   const pStyle = `margin:0 0 10px;text-align:justify;text-indent:40px;line-height:1.65;font-size:13.5px;${guj}`;
 
@@ -8463,10 +8498,10 @@ function renderObstructionNoticeSheet() {
     </p>
 
     <div style="font-size:13.5px;line-height:1.7;margin-bottom:6px;padding-left:40px;text-indent:-40px;${guj}">
-      <b>વિષય:</b> MGVCL દ્વારા હાથ ધરવામાં આવતી કામગીરી (સ્કીમ – ND, સોલાર તથા ખેતીવાડી) દરમિયાન સ્થળ ઉપર અડચણ ઊભી થવા બાબત.
+      <b>વિષય:</b> MGVCL દ્વારા હાથ ધરવામાં આવતી કામગીરી દરમિયાન સ્થળ ઉપર અડચણ ઊભી થવા બાબત.
     </div>
     <div style="font-size:13.5px;line-height:1.7;margin-bottom:16px;padding-left:40px;text-indent:-40px;${guj}">
-      <b>સંદર્ભ:</b> E-Urja SR No. <b>${escapeHtml(sr)}</b>, અરજી તારીખ: <b>${escapeHtml(appDate)}</b>
+      <b>સંદર્ભ:</b> <b>${escapeHtml(appType)}</b> – E-Urja SR No. <b>${escapeHtml(sr)}</b>, તા. <b>${escapeHtml(appDate)}</b>, સ્કીમ – <b>${escapeHtml(scheme)}</b>
     </div>
 
     <p style="margin:0 0 12px;font-size:13.5px;line-height:1.8;${guj}">સવિનય જણાવવાનું કે,</p>
